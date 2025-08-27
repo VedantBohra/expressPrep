@@ -6,6 +6,9 @@ const jwt = require('jsonwebtoken')
 const userValidator = require('./userValidator') // zod 
 const limiter = require('./rateLimiterMiddleware') 
 const multer = require('multer') // file storage through form data
+const authorization = require('./authorization')
+const {storageArray , post} = require('./db')
+
 
 require("dotenv").config()
 
@@ -17,6 +20,9 @@ app.use(limiter)
 
 const PORT = process.env.PORT || 5000
 const secretKey = process.env.JWT_SECRET
+
+// in memory cache Map to replicate a in-memory cache database
+const cache = new Map()
 
 // multer disk storage
 const storage = multer.diskStorage({
@@ -32,17 +38,13 @@ const storage = multer.diskStorage({
 // initializing multer object
 const upload = multer({ storage })
 
-const storageArray = [{name: "user1", password: "Hello1" ,age: 20 , id: 10 , sports: "football" , file: []},
-                      {name: "user2", password: "Hello2" , age: 23 , id: 20, sports: "football", file: []},
-                      {name: "user3", password: "Hello2" , age: 23 , id: 30, sports: "football", file: []},   
-                      {name: "user4", password: "Hello2" , age: 23 , id: 40, sports: "football", file: []},
-                      {name: "user5", password: "Hello2" , age: 23 , id: 50, sports: "cricket", file: []},
-                      {name: "user6", password: "Hello2" , age: 23 , id: 60, sports: "cricket", file: []},
-                      {name: "user7", password: "Hello2" , age: 23 , id: 70, sports: "cricket", file: []},
-                      {name: "user8", password: "Hello2" , age: 23 , id: 80, sports: "football", file: []},
-                      {name: "user9", password: "Hello2" , age: 23 , id: 90, sports: "football", file: []},
-                      {name: "user10", password: "Hello2" , age: 23 , id: 85, sports: "football", file: []}
-                    ]
+function transaction(user , amount , receiverName){
+    const index = storageArray.findIndex(user => receiverName == user.name)
+    const recievingUser = storageArray[index]
+
+    user.balance -= amount
+    recievingUser.balance += amount 
+}
 
 // get profile pic
 app.get('/profile-pic', authMiddleware ,(req , res) => {
@@ -72,10 +74,28 @@ app.post('/profile-pic', authMiddleware , upload.single('profilePic'), (req, res
 })
 
 app.get('/users' , (req , res) => {
+    const cacheKey = req.originalUrl // including query params
+    const timePeriod = 60 * 1000 // 60s in ms
+    // check if the url query exists as a key
+    if(cache.has(cacheKey)){
+        const {data , timestamp} = cache.get(cacheKey)
+
+        // if expired invalidate the key and create a new one on next write operation
+        if(Date.now() - timestamp < timePeriod){
+            console.log("Returned from cache database")
+            return res.status(200).json(data)
+        } else{
+            cache.delete(cacheKey) // invalidating the key which is over their time period
+        }
+    } 
+
     if(Object.keys(req.query).length !== 0){
         if(Object.prototype.hasOwnProperty.call(req.query, "age")){
             const { age } = req.query
             const filteredAgeUser = storageArray.filter(user => user.age === parseInt(age))
+
+            // setting our cache key on every response that can be send from backend
+            cache.set(cacheKey , {data: {"Filtered Age users": filteredAgeUser} , timestamp: Date.now()})
             return res.status(200).json({"Filtered Age Users" : filteredAgeUser})
         }
 
@@ -91,6 +111,8 @@ app.get('/users' , (req , res) => {
                 sortedUsers.sort((a , b) => b.name.localeCompare(a.name))    
             }
 
+            // setting our cache key on every response that can be send from backend
+            cache.set(cacheKey , {data: {"Sorted users": sortedUsers} , timestamp: Date.now()})
             return res.status(200).json({"sortedUsers" : sortedUsers})
         }
 
@@ -125,7 +147,9 @@ app.get('/users' , (req , res) => {
                 for(let i = pageFirstIndex; i < pageLastIndex; i++){
                     resultPage.push(filteredArraySearch[i])
                 }
-                
+
+            // setting our cache key on every response that can be send from backend                
+                cache.set(cacheKey , {data: {"Page": resultPage} , timestamp: Date.now()})
                 return res.status(200).json({Page: resultPage})
             }
         }
@@ -137,6 +161,8 @@ app.get('/users' , (req , res) => {
         })
     }
 
+    // setting our cache key on every response that can be send from backend                
+    cache.set(cacheKey , {data: {"users": storageArray} , timestamp: Date.now()})
     return res.status(200).json({users: storageArray})
 }) 
 
@@ -150,7 +176,6 @@ app.get('/profile' , authMiddleware , (req ,res) => {
 
 app.post('/login' , (req , res) => {
     const loggedUser = req.body
-    
     const findUserIndex = storageArray.findIndex(user => loggedUser.name === user.name)
     if(findUserIndex === -1) return res.status(404).json({msg: "Username does not exist"})
 
@@ -211,18 +236,99 @@ app.put('/users/:id' , (req, res) => {
     return res.status(200).json({msg: "User updated successfully"})
 })
 
-app.delete('/users/:id' , (req , res) => {
+app.delete('/users/:id' ,authMiddleware ,authorization , (req , res) => {
     const deleteId = parseInt(req.params.id)
     if(!deleteId) return res.status(400).json({msg: "No userId received to delete"})
-
+    
     const index = storageArray.findIndex(user => user.id === deleteId)
     if(index === -1) return res.status(404).json({msg: "User not found"})
+    
+    if(storageArray[index].role == "Admin") return res.status(403).json({msg: "An admin cannot delete another admin"})
 
     storageArray.splice(index , 1)
 
     return res.status(200).json({
         msg: "Successfully deleted user"
     })
+})
+
+app.post('/transfer', (req, res) => {
+    const { sender, receiver, amount } = req.body;
+
+    if (!sender || !receiver || !amount) {
+        return res.status(400).json({ msg: "Missing transaction details" });
+    }
+
+    // Find both users
+    const senderIndex = storageArray.findIndex(u => u.name === sender);
+    const receiverIndex = storageArray.findIndex(u => u.name === receiver);
+
+    if (senderIndex === -1 || receiverIndex === -1) {
+        return res.status(404).json({ msg: "Sender or receiver not found" });
+    }
+
+    const senderUser = storageArray[senderIndex];
+    const receiverUser = storageArray[receiverIndex];
+
+    // Check balance
+    if (senderUser.balance < amount) {
+        return res.status(400).json({ msg: "Insufficient funds" });
+    }
+
+    // Save state for rollback
+    const prevSenderBalance = senderUser.balance;
+    const prevReceiverBalance = receiverUser.balance;
+
+    // Start transaction simulation
+    try {
+        // Perform operations
+        senderUser.balance -= amount;
+        receiverUser.balance += amount;
+
+        // Simulate a failure check (optional)
+        if (receiverUser.balance < 0) {
+            throw new Error("Invalid transaction state");
+        }
+
+        return res.status(200).json({
+            msg: "Transaction completed",
+            sender: senderUser,
+            receiver: receiverUser
+        });
+
+    } catch (err) {
+        // Rollback if error
+        senderUser.balance = prevSenderBalance;
+        receiverUser.balance = prevReceiverBalance;
+
+        return res.status(500).json({ msg: "Transaction failed, rolled back", error: err.message });
+    }
+});
+
+app.post('/post/:id/comments' , (req , res) => {
+    const {comment} = req.body
+    const postId = req.params.id
+    
+    const postIndex = post.findIndex(post => post.id == postId)
+    if(postIndex == -1) return res.status(404).json({msg: "Post not found"})
+    const currentPost = post[postIndex]
+
+    const commentId = Math.floor(Math.random() + 1 * 100)
+    currentPost.Comments.push({...comment , commentId})
+
+    return res.status(200).json({msg: "Comment has been recorded"})
+})
+
+// nested post / comment relationship get route
+app.get('/post/:id/comments' , (req, res) => {
+    const postId = req.params.id
+
+    const postIndex = post.findIndex(post => post.id == postId)
+    if(postIndex == -1) return res.status(404).json({msg: "Post not found"})
+
+    const currentPost = post[postIndex]
+
+    return res.status(200).json({Comments: currentPost.Comments})
 })
 
 // Centralised catch all error handler last line of defence
