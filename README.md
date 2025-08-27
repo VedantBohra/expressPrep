@@ -1,6 +1,6 @@
-# Easy Level - Express Backend
+# Medium Level - Express Backend
 
-This is the **Easy level** of the project assignment.  
+This is the **Medium level** of the project assignment.  
 It sets up a basic Express server that you can run locally and test using Postman.
 
 ---
@@ -15,7 +15,7 @@ cd <your-repo-folder>
 
 ### 2. Switch to the Easy branch
 ```bash
-git checkout easy
+git checkout medium
 ```
 
 ### 3. Install dependencies
