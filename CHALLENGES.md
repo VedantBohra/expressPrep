@@ -88,14 +88,7 @@ All challenges can be tested with **Postman** (except WebSockets which need a cl
 - If balance is insufficient → rollback transaction.
 - Simulate with in-memory users having balances.
 
-### 5. WebSockets Integration (Chat Simulation)
-- Add basic WebSocket (or Socket.IO) integration for real-time messaging.
-- Clients can:
-  - join a room
-  - send messages
-  - broadcast messages to all in the room
 
 ---
 
 👉 Use **Postman** for REST APIs.  
-👉 For **WebSockets**, use Socket.IO client or Postman’s WebSocket feature.
