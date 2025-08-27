@@ -1,6 +1,6 @@
-# Easy Level - Express Backend
+# Hard Level - Express Backend
 
-This is the **Easy level** of the project assignment.  
+This is the **Hard level** of the project assignment.  
 It sets up a basic Express server that you can run locally and test using Postman.
 
 ---
@@ -13,9 +13,9 @@ git clone <your-repo-url>
 cd <your-repo-folder>
 ```
 
-### 2. Switch to the Easy branch
+### 2. Switch to the Hard branch
 ```bash
-git checkout easy
+git checkout Hard
 ```
 
 ### 3. Install dependencies
